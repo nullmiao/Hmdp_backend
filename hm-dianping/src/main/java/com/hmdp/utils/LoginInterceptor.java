@@ -1,15 +1,23 @@
 package com.hmdp.utils;
 
 
+import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.util.StrUtil;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.User;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 import javax.servlet.http.HttpSession;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
 public class LoginInterceptor implements HandlerInterceptor {
+
+
 
      /**
       * 目标方法执行之前
@@ -17,21 +25,12 @@ public class LoginInterceptor implements HandlerInterceptor {
       */
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-     //1.获取session
-        //2.获取用户信息
-        //3.判断用户信息是否存在
-        //4.存在，放行
-        //5.不存在，返回401状态码，拦截
-      HttpSession session=request.getSession();
-        Object user= session.getAttribute("user");
-        if (user==null){
+        if (UserHolder.getUser() == null) {
             //没有登录，拦截
             response.setStatus(401);
             return false;
-
         }
-        UserHolder.saveUser((UserDTO) user);
-        return true;
+    return true;
     }
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) throws Exception {
