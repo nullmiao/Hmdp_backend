@@ -1,5 +1,6 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.hmdp.dto.Result;
@@ -31,7 +32,14 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 @Resource
     private StringRedisTemplate stringRedisTemplate;
     @Override
-    public Result queryById(Long id) {
+    public Result queryById(Long id) throws InterruptedException {
+//        Shop shop = queryWithPassThrough(id);
+        Shop shop = queryWithMutex(id);
+
+        return Result.ok(shop);
+
+    }
+    public Shop queryWithMutex(Long id) throws InterruptedException {
         //1.redis查询商铺缓存
         //2.如果存在，直接返回
         //3.如果不存在，根据id查询数据库
@@ -40,23 +48,73 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         String shopJson = stringRedisTemplate.opsForValue().get(CACHE_SHOP_KEY + id);
         if (StrUtil.isNotBlank(shopJson)) {
             Shop bean = JSONUtil.toBean(shopJson, Shop.class);
-            return Result.ok(bean);
+            return bean;
         }
         /// 如果命中的是空字符串，说明之前查询过这个商铺但不存在，直接返回错误信息，避免再次访问数据库。
         if (shopJson != null) {
-            return Result.fail("商铺不存在");
+            return null;
         }
-        Shop shop = getById(id);
-        if (shop == null) {
-            /// 这段代码是为了防止缓存穿透而添加的。当查询一个不存在的商铺时，数据库会返回null。为了避免每次查询都访问数据库，
-            ///我们将一个空字符串写入Redis，并设置一个较短的过期时间（CACHE_NULL_TTL）。
-            ///这样，当下次查询同一个不存在的商铺时，Redis会直接返回这个空字符串，而不会访问数据库，从而有效地防止了缓存穿透问题。
-            stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, "",CACHE_NULL_TTL, TimeUnit.MINUTES);
-            return Result.fail("商铺不存在");
+        ///实现缓存重建
+        String lockKey = LOCK_SHOP_KEY + id;
+        boolean isLock = tryLock(lockKey);
+        if (!isLock) {
+            //获取锁失败，休眠并重试
+            Thread.sleep(50);
+            queryWithMutex(id);
         }
-        stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, JSONUtil.toJsonStr(shop),CACHE_SHOP_TTL, TimeUnit.MINUTES);
-        return Result.ok(shop);
+            Shop shop = getById(id);
+        Thread.sleep(200);
+            if (shop == null) {
+                /// 这段代码是为了防止缓存穿透而添加的。当查询一个不存在的商铺时，数据库会返回null。为了避免每次查询都访问数据库，
+                ///我们将一个空字符串写入Redis，并设置一个较短的过期时间（CACHE_NULL_TTL）。
+                ///这样，当下次查询同一个不存在的商铺时，Redis会直接返回这个空字符串，而不会访问数据库，从而有效地防止了缓存穿透问题。
+                stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
+                return null;
+            }
+            stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, JSONUtil.toJsonStr(shop), CACHE_SHOP_TTL, TimeUnit.MINUTES);
 
+            unlock(lockKey);
+
+            return shop;
+        }
+
+/// TODO使用互斥锁解决缓存击穿问题
+// 定义一个互斥锁的键，通常是原缓存键加上一个后缀，例如 ":lock"。
+// 在查询数据库之前，尝试获取这个互斥锁。如果获取成功，说明当前线程可以安全地访问数据库并更新缓存；如果获取失败，说明另一个线程正在访问数据库，当前线程应该等待一段时间后重试。
+public Shop queryWithPassThrough(Long id){
+    //1.redis查询商铺缓存
+    //2.如果存在，直接返回
+    //3.如果不存在，根据id查询数据库
+    //4.不存在，返回错误信息
+    //5.存在，写入redis并返回
+    String shopJson = stringRedisTemplate.opsForValue().get(CACHE_SHOP_KEY + id);
+    if (StrUtil.isNotBlank(shopJson)) {
+        Shop bean = JSONUtil.toBean(shopJson, Shop.class);
+        return bean;
+    }
+    /// 如果命中的是空字符串，说明之前查询过这个商铺但不存在，直接返回错误信息，避免再次访问数据库。
+    if (shopJson != null) {
+        return null;
+    }
+    Shop shop = getById(id);
+    if (shop == null) {
+        /// 这段代码是为了防止缓存穿透而添加的。当查询一个不存在的商铺时，数据库会返回null。为了避免每次查询都访问数据库，
+        ///我们将一个空字符串写入Redis，并设置一个较短的过期时间（CACHE_NULL_TTL）。
+        ///这样，当下次查询同一个不存在的商铺时，Redis会直接返回这个空字符串，而不会访问数据库，从而有效地防止了缓存穿透问题。
+        stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, "",CACHE_NULL_TTL, TimeUnit.MINUTES);
+        return null;
+    }
+    stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, JSONUtil.toJsonStr(shop),CACHE_SHOP_TTL, TimeUnit.MINUTES);
+    return shop;
+}
+//获取锁
+private boolean tryLock(String key){
+        Boolean b = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 10, TimeUnit.SECONDS);
+        return BooleanUtil.isTrue(b);
+    }
+    //释放锁
+    private void unlock(String key){
+        stringRedisTemplate.delete(key);
     }
 
     @Override
