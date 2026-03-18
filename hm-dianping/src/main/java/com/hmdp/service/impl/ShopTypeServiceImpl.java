@@ -29,16 +29,26 @@ private StringRedisTemplate stringRedisTemplate;
     private IShopTypeService typeService;
     @Override
     public Result queryList() {
+        // 1. 从Redis获取缓存
         String cacheList = stringRedisTemplate.opsForValue().get("cache:type:list");
+
+        // 2. 缓存存在：解析JSON数组字符串为List<ShopType>
         if (StrUtil.isNotBlank(cacheList)) {
-            return Result.ok(cacheList);
+            // 关键修复：用toList解析数组，而非toBean（toBean默认解析对象）
+            List<ShopType> typeList = JSONUtil.toList(cacheList, ShopType.class);
+            return Result.ok(typeList);
         }
-        List<ShopType> typeList = typeService
-                .query().orderByAsc("sort").list();
-        if (typeList == null) {
+
+        // 3. 缓存不存在：查询数据库
+        List<ShopType> typeList = typeService.query().orderByAsc("sort").list();
+        if (typeList == null || typeList.isEmpty()) {
             return Result.fail("商铺类型不存在");
         }
+
+        // 4. 写入Redis（存JSON数组字符串）
         stringRedisTemplate.opsForValue().set("cache:type:list", JSONUtil.toJsonStr(typeList));
+
+        // 5. 返回数据库查询结果
         return Result.ok(typeList);
     }
 }
