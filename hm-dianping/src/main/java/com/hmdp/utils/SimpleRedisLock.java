@@ -7,6 +7,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 public class SimpleRedisLock implements Ilock{
@@ -43,11 +44,12 @@ public class SimpleRedisLock implements Ilock{
     @Override
     public void unlock() {
         /// redis中的stringRedisTemplate中的api的execute函数可以调用lua脚本
-        stringRedisTemplate.execute(
+      stringRedisTemplate.execute(
                 UNLOCK_SCRIPT,
-                Collections.singletonList(KEY_PREFIX+name),
-                ID_PREFIX+Thread.currentThread().getId()
+                Collections.singletonList(KEY_PREFIX + name),
+                ID_PREFIX + Thread.currentThread().getId()
         );
+
     }
 
 //    @Override
