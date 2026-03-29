@@ -90,4 +90,25 @@ void testCache() throws InterruptedException {
             stringRedisTemplate.opsForGeo().add(key, locations);
         }
     }
+    @Test
+    public void testHyperLogLog() {
+        // 初始化数组，用于批量存储待添加的字符串
+        String[] values = new String[1000];
+        int j = 0;
+
+        // 循环100万次，模拟生成用户数据
+        for (int i = 0; i < 1000000; i++) {
+            j = i % 1000;
+            values[j] = "user_" + i;
+
+            // 每满1000条数据，批量添加到Redis的HyperLogLog中
+            if (j == 999) {
+                stringRedisTemplate.opsForHyperLogLog().add("hl2", values);
+            }
+        }
+
+        // 统计HyperLogLog中的基数（去重后数量）
+        Long count = stringRedisTemplate.opsForHyperLogLog().size("hl2");
+        System.out.println("count = " + count);
+    }
 }
